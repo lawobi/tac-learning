@@ -1,0 +1,7 @@
+streamlit
+openai
+python-dotenv
+stripe
+bcrypt
+python-docx
+itsdangerous
