@@ -237,10 +237,20 @@ def login_user(email, pw):
     email = email.strip().lower()
     conn = db()
     c = conn.cursor()
+
+    # Safe select with fallback defaults
     c.execute("""
-        SELECT id, password, paid, subscription_status, org_id, role
-        FROM users WHERE email=?
+        SELECT 
+            id,
+            password,
+            paid,
+            COALESCE(subscription_status, 'none'),
+            COALESCE(org_id, NULL),
+            COALESCE(role, 'individual')
+        FROM users
+        WHERE email=?
     """, (email,))
+
     row = c.fetchone()
     conn.close()
 
@@ -253,7 +263,9 @@ def login_user(email, pw):
             "org_id": row[4],
             "role": row[5],
         }
+
     return None
+
 
 def update_password(email: str, new_pw: str):
     email = email.strip().lower()
@@ -834,5 +846,6 @@ with tab_account:
             st.caption("No QA audits yet.")
     else:
         st.info("Log in to see account details and QA logs.")
+
 
 
