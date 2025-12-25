@@ -142,6 +142,27 @@ def init_db():
 
 init_db()
 
+def migrate_users_table():
+    conn = db()
+    c = conn.cursor()
+
+    # Check existing columns
+    c.execute("PRAGMA table_info(users)")
+    existing_cols = {row[1] for row in c.fetchall()}
+
+    migrations = {
+        "subscription_status": "ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT 'none'",
+        "org_id": "ALTER TABLE users ADD COLUMN org_id INTEGER",
+        "role": "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'individual'",
+    }
+
+    for col, sql in migrations.items():
+        if col not in existing_cols:
+            c.execute(sql)
+
+    conn.commit()
+    conn.close()
+
 
 # =========================
 # 5) SESSION STATE
@@ -795,3 +816,4 @@ with tab_account:
             st.caption("No QA audits yet.")
     else:
         st.info("Log in to see account details and QA logs.")
+
