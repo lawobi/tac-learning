@@ -30,7 +30,24 @@ try:
 except Exception:
     OpenAI = None  # allow app to run even if openai not installed
 
+def migrate_users_table():
+    conn = db()
+    c = conn.cursor()
 
+    c.execute("PRAGMA table_info(users)")
+    cols = {row[1] for row in c.fetchall()}
+
+    if "subscription_status" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT 'none'")
+
+    if "org_id" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN org_id INTEGER")
+
+    if "role" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'individual'")
+
+    conn.commit()
+    conn.close()
 # =========================
 # 2) PEDAGOGY (INLINE)
 # =========================
@@ -141,6 +158,7 @@ def init_db():
     conn.close()
 
 init_db()
+migrate_users_table()
 
 def migrate_users_table():
     conn = db()
@@ -816,4 +834,5 @@ with tab_account:
             st.caption("No QA audits yet.")
     else:
         st.info("Log in to see account details and QA logs.")
+
 
