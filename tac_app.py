@@ -1,4 +1,4 @@
-# tac_app.py
+# tac_app.py — single working Streamlit app (clean + stable)
 
 # =========================
 # 0) STREAMLIT CONFIG (must be first Streamlit call)
@@ -30,24 +30,6 @@ try:
 except Exception:
     OpenAI = None  # allow app to run even if openai not installed
 
-def migrate_users_table():
-    conn = db()
-    c = conn.cursor()
-
-    c.execute("PRAGMA table_info(users)")
-    cols = {row[1] for row in c.fetchall()}
-
-    if "subscription_status" not in cols:
-        c.execute("ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT 'none'")
-
-    if "org_id" not in cols:
-        c.execute("ALTER TABLE users ADD COLUMN org_id INTEGER")
-
-    if "role" not in cols:
-        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'individual'")
-
-    conn.commit()
-    conn.close()
 # =========================
 # 2) PEDAGOGY (INLINE)
 # =========================
@@ -160,6 +142,7 @@ def init_db():
 init_db()
 migrate_users_table()
 
+
 def migrate_users_table():
     conn = db()
     c = conn.cursor()
@@ -181,6 +164,24 @@ def migrate_users_table():
     conn.commit()
     conn.close()
 
+def migrate_users_table():
+    conn = db()
+    c = conn.cursor()
+
+    cols = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+
+    if "subscription_status" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT 'none'")
+    if "org_id" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN org_id INTEGER")
+    if "role" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'individual'")
+
+    conn.commit()
+    conn.close()
+
+migrate_users_table()
+
 
 # =========================
 # 5) SESSION STATE
@@ -196,6 +197,16 @@ st.session_state.setdefault("worksheet_image_bytes", None)
 
 st.session_state.setdefault("brand_logo_bytes", None)
 
+# =========================
+# STRIPE RETURN HANDLER (STEP 7)
+# =========================
+qp = st.query_params
+
+if qp.get("subscribed") == "true" and st.session_state.user:
+    mark_subscribed(st.session_state.user["id"])
+    st.session_state.user["paid"] = True
+    st.session_state.user["subscription_status"] = "active"
+    st.success("✅ Subscription activated. Full access unlocked.")
 
 # =========================
 # 6) AUTH HELPERS
@@ -223,7 +234,7 @@ def create_user(email, pw, org_code=None):
     try:
         conn = db()
         c = conn.cursor()
-        c.execute(
+        c.def login_userexecute(
             "INSERT INTO users (email, password, org_id, role) VALUES (?, ?, ?, ?)",
             (email, hashed, org_id, role),
         )
@@ -233,24 +244,14 @@ def create_user(email, pw, org_code=None):
     except sqlite3.IntegrityError:
         return (False, "Account already exists")
 
-def login_user(email, pw):
+(email, pw):
     email = email.strip().lower()
     conn = db()
     c = conn.cursor()
-
-    # Safe select with fallback defaults
     c.execute("""
-        SELECT 
-            id,
-            password,
-            paid,
-            COALESCE(subscription_status, 'none'),
-            COALESCE(org_id, NULL),
-            COALESCE(role, 'individual')
-        FROM users
-        WHERE email=?
+        SELECT id, password, paid, subscription_status, org_id, role
+        FROM users WHERE email=?
     """, (email,))
-
     row = c.fetchone()
     conn.close()
 
@@ -263,9 +264,7 @@ def login_user(email, pw):
             "org_id": row[4],
             "role": row[5],
         }
-
     return None
-
 
 def update_password(email: str, new_pw: str):
     email = email.strip().lower()
@@ -327,15 +326,39 @@ def send_email(to_email: str, subject: str, body: str):
 # =========================
 # 8) STRIPE (SUBSCRIPTIONS)
 # =========================
+#def start_subscription_checkout(plan: str, email: str):
+ #   if not STRIPE_READY:
+  #      raise RuntimeError("Stripe secrets/prices not configured in Streamlit secrets.")
+   # if plan == "monthly":
+    #    price_id = STRIPE_PRICE_MONTHLY
+    #elif plan == "annual":
+     #   price_id = STRIPE_PRICE_ANNUAL
+    #else:
+     #   raise ValueError("Invalid plan")
+
+    #session = stripe.checkout.Session.create(
+     #   mode="subscription",
+      #  payment_method_types=["card"],
+       # line_items=[{"price": price_id, "quantity": 1}],
+        #customer_email=email,
+        #success_url=f"{APP_BASE_URL}/?subscribed=true",
+        #cancel_url=f"{APP_BASE_URL}/",
+    #)
+    #return session.url
+
 def start_subscription_checkout(plan: str, email: str):
-    if not STRIPE_READY:
-        raise RuntimeError("Stripe secrets/prices not configured in Streamlit secrets.")
+    if not email:
+        raise ValueError("Missing customer email")
+
     if plan == "monthly":
         price_id = STRIPE_PRICE_MONTHLY
     elif plan == "annual":
         price_id = STRIPE_PRICE_ANNUAL
     else:
         raise ValueError("Invalid plan")
+
+    if not price_id:
+        raise ValueError("Stripe price ID missing")
 
     session = stripe.checkout.Session.create(
         mode="subscription",
@@ -345,6 +368,7 @@ def start_subscription_checkout(plan: str, email: str):
         success_url=f"{APP_BASE_URL}/?subscribed=true",
         cancel_url=f"{APP_BASE_URL}/",
     )
+
     return session.url
 
 
@@ -495,38 +519,68 @@ def paid_download_block(title: str, text: str, main_image_bytes=None, brand_logo
 # =========================
 # 11) SUBSCRIPTION PANEL (DEFINE BEFORE TABS)
 # =========================
+#(def show_subscription_panel():
+    #st.subheader("🔓 Unlock Full Access")
+
+    #if not STRIPE_READY:
+       # st.error("Stripe is not configured (missing STRIPE_SECRET_KEY / price IDs in secrets).")
+      #  st.caption("Add STRIPE_SECRET_KEY, STRIPE_PRICE_MONTHLY, STRIPE_PRICE_ANNUAL in Streamlit secrets.")
+     #   return
+
+    #plan = st.radio(
+        #"Choose your plan",
+       # ["Monthly (£10/month)", "Annual (£100/year)"],
+      #  index=0,
+     #   key="plan_radio",
+    #)
+
+    #if not st.session_state.user:
+      #  st.info("🔐 Log in or create an account to subscribe.")
+     #   return
+
+    #if st.session_state.user.get("paid"):
+       # st.success("✅ Subscription active")
+      #  st.caption(f"Status: {st.session_state.user.get('subscription_status', 'active')}")
+     #   return
+
+    #if st.button("Subscribe now", key="subscribe_now"):
+       # plan_key = "monthly" if "Monthly" in plan else "annual"
+      #  url = start_subscription_checkout(plan_key, st.session_state.user["email"])
+        # More reliable than markdown links
+     #   try:
+            st.link_button("Continue to secure Stripe Checkout", url)
+    #    except Exception:
+   #         st.markdown(f"👉 [Continue to secure Stripe Checkout]({url})"))
+
 def show_subscription_panel():
     st.subheader("🔓 Unlock Full Access")
-
-    if not STRIPE_READY:
-        st.error("Stripe is not configured (missing STRIPE_SECRET_KEY / price IDs in secrets).")
-        st.caption("Add STRIPE_SECRET_KEY, STRIPE_PRICE_MONTHLY, STRIPE_PRICE_ANNUAL in Streamlit secrets.")
-        return
 
     plan = st.radio(
         "Choose your plan",
         ["Monthly (£10/month)", "Annual (£100/year)"],
         index=0,
-        key="plan_radio",
+        key="subscription_plan",
     )
 
     if not st.session_state.user:
-        st.info("🔐 Log in or create an account to subscribe.")
+        st.info("Please log in to subscribe.")
         return
 
     if st.session_state.user.get("paid"):
         st.success("✅ Subscription active")
-        st.caption(f"Status: {st.session_state.user.get('subscription_status', 'active')}")
         return
 
-    if st.button("Subscribe now", key="subscribe_now"):
+    if st.button("Subscribe now"):
         plan_key = "monthly" if "Monthly" in plan else "annual"
-        url = start_subscription_checkout(plan_key, st.session_state.user["email"])
-        # More reliable than markdown links
+
         try:
-            st.link_button("Continue to secure Stripe Checkout", url)
-        except Exception:
-            st.markdown(f"👉 [Continue to secure Stripe Checkout]({url})")
+            checkout_url = start_subscription_checkout(
+                plan_key,
+                st.session_state.user["email"]
+            )
+            st.markdown(f"👉 [Continue to secure payment]({checkout_url})")
+        except Exception as e:
+            st.error(f"Stripe error: {e}")
 
 
 # =========================
@@ -846,7 +900,4 @@ with tab_account:
             st.caption("No QA audits yet.")
     else:
         st.info("Log in to see account details and QA logs.")
-
-
-
 
