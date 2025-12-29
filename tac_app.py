@@ -1,4 +1,4 @@
-# tac_app.py — single working Streamlit app (clean + stable)
+# tac_app.py
 
 # =========================
 # 0) STREAMLIT CONFIG (must be first Streamlit call)
@@ -846,6 +846,7 @@ with tab_account:
             st.caption("No QA audits yet.")
     else:
         st.info("Log in to see account details and QA logs.")
+
 
 
 
